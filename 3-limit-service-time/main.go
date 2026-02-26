@@ -10,6 +10,12 @@
 
 package main
 
+import (
+	"fmt"
+	"sync"
+	"time"
+)
+
 // User defines the UserModel. Use this to check whether a User is a
 // Premium user or not
 type User struct {
@@ -18,11 +24,60 @@ type User struct {
 	TimeUsed  int64 // in seconds
 }
 
+var timelimit int64 = 10
+
+var mu sync.Mutex
+
 // HandleRequest runs the processes requested by users. Returns false
 // if process had to be killed
 func HandleRequest(process func(), u *User) bool {
-	process()
-	return true
+
+	if u.IsPremium {
+		process()
+		return true
+	}
+
+	mu.Lock()
+	timeRemaining := timelimit - u.TimeUsed
+	mu.Unlock()
+
+	fmt.Printf("Uwer %d has %d seconds \n", u.ID, timeRemaining)
+
+	if timeRemaining <= 0 {
+		return false
+	}
+
+	timer := time.NewTimer(time.Duration(timeRemaining) * time.Second)
+	defer timer.Stop()
+
+	start := time.Now()
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		process()
+
+	}()
+
+	select {
+	case <-timer.C:
+		mu.Lock()
+		u.TimeUsed = timelimit
+		mu.Unlock()
+		return false
+	case <-done:
+		mu.Lock()
+
+		remaining := int64((time.Since(start) + time.Second - 1) / time.Second)
+
+		if remaining+u.TimeUsed > timelimit {
+			u.TimeUsed = timelimit
+		} else {
+			u.TimeUsed += remaining
+		}
+		mu.Unlock()
+		return true
+	}
 }
 
 func main() {
