@@ -13,10 +13,44 @@
 
 package main
 
+import (
+	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
+)
+
 func main() {
+	sigChan := make(chan os.Signal, 1)
+	done := make(chan struct{})
+
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	// Create a process
 	proc := MockProcess{}
 
-	// Run the process (blocking)
-	proc.Run()
+	go func() {
+		proc.Run()
+		close(done)
+	}()
+
+	select {
+	case <-sigChan:
+		stopDone := make(chan struct{})
+
+		go func() {
+			proc.Stop()
+			close(stopDone)
+		}()
+
+		select {
+		case <-sigChan:
+			fmt.Println("Kill process")
+			os.Exit(1)
+		case <-stopDone:
+			fmt.Println("Process stop itself")
+		}
+
+	case <-done:
+		fmt.Println("Process stop itself")
+	}
 }
